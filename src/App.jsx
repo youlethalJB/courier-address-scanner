@@ -22,72 +22,33 @@ function App() {
     setTimeout(() => setShowToast({ show: false, message: '' }), 3000)
   }
 
-  const shouldExcludeLine = (line) => {
-    const trimmed = line.trim()
-    
-    // Filter out very short lines (less than 2 chars)
-    if (trimmed.length < 2) return true
-    
-    // Filter out obvious headers (all caps, very long)
-    if (trimmed === trimmed.toUpperCase() && trimmed.length > 25) {
-      if (/^(SHIP|DELIVERY|ADDRESS|TO|FROM|ORDER|TRACKING|PARCEL)/i.test(trimmed)) {
-        return true
-      }
-    }
-    
-    // Filter out long tracking numbers (15+ characters of numbers/letters only)
-    const alphanumericOnly = /^[A-Z0-9\-_]+$/i.test(trimmed.replace(/\s/g, ''))
-    if (alphanumericOnly && trimmed.replace(/[\s-]/g, '').length >= 15) return true
-    
-    // Filter out lines that are just long numbers (10+ digits)
-    const justNumbers = /^\d+$/.test(trimmed.replace(/\s/g, ''))
-    if (justNumbers && trimmed.replace(/\s/g, '').length >= 10) return true
-    
-    return false
-  }
-
   const extractAddress = (text) => {
     const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0)
     
     // Find the line with the postcode
     let postcodeIndex = -1
-    let postcodeLine = ''
     for (let i = 0; i < lines.length; i++) {
       if (POSTCODE_REGEX.test(lines[i])) {
         postcodeIndex = i
-        postcodeLine = lines[i]
         break
       }
     }
 
     if (postcodeIndex === -1) {
-      // No postcode found, return filtered text
-      const filteredLines = lines.filter(line => !shouldExcludeLine(line))
-      return filteredLines.join(', ') || text
+      // No postcode found, return original text
+      return text
     }
 
-    // Extract postcode separately (may have other text on same line)
-    const postcodeMatch = postcodeLine.match(POSTCODE_REGEX)
-    const searchedPostcode = postcodeMatch ? postcodeMatch[0] : postcodeLine
+    // Extract postcode from the line
+    const postcodeMatch = lines[postcodeIndex].match(POSTCODE_REGEX)
+    const postcode = postcodeMatch ? postcodeMatch[0] : lines[postcodeIndex]
     
-    // Get lines before postcode (2-4 lines typically)
-    const addressLines = []
+    // Get up to 5 lines before the postcode (including the postcode line)
+    const startIndex = Math.max(0, postcodeIndex - 5)
+    const addressLines = lines.slice(startIndex, postcodeIndex + 1)
     
-    // Start from up to 4 lines before postcode
-    const startIndex = Math.max(0, postcodeIndex - 4)
-    
-    for (let i = startIndex; i < postcodeIndex; i++) {
-      const line = lines[i]
-      
-      // Skip obvious non-address lines
-      if (shouldExcludeLine(line)) continue
-      
-      // Add the line (be permissive - trust the user to edit if needed)
-      addressLines.push(line)
-    }
-    
-    // Add postcode at the end
-    addressLines.push(searchedPostcode)
+    // Replace the postcode line with just the clean postcode
+    addressLines[addressLines.length - 1] = postcode
     
     return addressLines.join(', ')
   }
