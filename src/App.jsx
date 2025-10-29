@@ -46,34 +46,77 @@ function App() {
     // Helper to check if a line is likely package metadata (not address)
     const isPackageMetadata = (line) => {
       const trimmed = line.trim()
+      
+      // Very short lines with weird characters (OCR noise like "3£")
+      if (trimmed.length < 4 && /[£$€¥#@%&*+=<>]/.test(trimmed)) return true
+      
+      // Lines with too many special characters (likely OCR noise from barcodes/QR codes)
+      const specialChars = trimmed.match(/[£$€¥#@%&*+=<>\[\]{}|\\\/~`^]/g) || []
+      if (specialChars.length > 2 || (specialChars.length > 0 && trimmed.length < 8)) return true
+      
+      // Lines with random character patterns (no spaces, mixed case/number/special - OCR noise)
+      if (trimmed.length > 3 && !/\s/.test(trimmed) && /[A-Za-z].*\d.*[£$€¥#@%&*]/.test(trimmed)) return true
+      
       // Very long lines (likely tracking info or barcodes)
       if (trimmed.length > 40) return true
+      
       // Long alphanumeric strings without spaces (tracking numbers)
       if (/^[A-Z0-9\-_]{15,}$/i.test(trimmed.replace(/\s/g, ''))) return true
+      
       // Headers like "SHIP TO", "DELIVERY ADDRESS", etc.
       if (trimmed === trimmed.toUpperCase() && /^(SHIP|DELIVERY|ADDRESS|TO|FROM|ORDER|TRACKING|PARCEL|REF)/i.test(trimmed)) return true
+      
       // Lines that are mostly numbers (tracking numbers)
       const numRatio = (trimmed.match(/\d/g) || []).length / trimmed.length
       if (numRatio > 0.8 && trimmed.length > 10) return true
+      
+      // Lines that don't have enough letters to be an address (likely OCR noise)
+      const letterCount = (trimmed.match(/[A-Za-z]/g) || []).length
+      if (letterCount < 2 && trimmed.length > 5) return true
+      
       return false
     }
     
-    // Work backwards from postcode, collecting address lines
-    // UK addresses typically have: name, street, town/city, postcode (3-4 lines total)
-    const addressLines = []
-    let linesToCheck = Math.min(6, postcodeIndex) // Check up to 6 lines before postcode
+    // Helper to check if a line looks like a valid address line
+    const isValidAddressLine = (line) => {
+      const trimmed = line.trim()
+      
+      // Must have at least some letters (addresses need street names, town names, etc.)
+      if (!/[A-Za-z]/.test(trimmed)) return false
+      
+      // Must be reasonable length (too short might be OCR fragments, too long might be something else)
+      if (trimmed.length < 2 || trimmed.length > 50) return false
+      
+      // Should have reasonable letter-to-symbol ratio
+      const letterCount = (trimmed.match(/[A-Za-z\s]/g) || []).length
+      const letterRatio = letterCount / trimmed.length
+      if (letterRatio < 0.4 && trimmed.length > 5) return false
+      
+      return true
+    }
     
-    for (let i = postcodeIndex - 1; i >= 0 && addressLines.length < 3 && linesToCheck > 0; i--) {
+    // Work backwards from postcode, collecting address lines
+    // UK addresses typically have: name, street, town/city, postcode (4-5 lines total with extra lines sometimes)
+    const addressLines = []
+    let linesToCheck = Math.min(8, postcodeIndex) // Check up to 8 lines before postcode
+    
+    for (let i = postcodeIndex - 1; i >= 0 && addressLines.length < 4 && linesToCheck > 0; i--) {
       const line = lines[i]
       
-      // Skip package metadata
+      // Skip package metadata and OCR noise
       if (isPackageMetadata(line)) {
         linesToCheck--
         continue
       }
       
-      // If we already have 3 lines and this line is very short or looks like metadata, stop
-      if (addressLines.length >= 3 && (line.length < 3 || isPackageMetadata(line))) {
+      // Only add lines that look like valid address lines
+      if (!isValidAddressLine(line)) {
+        linesToCheck--
+        continue
+      }
+      
+      // If we already have 4 lines and this line doesn't look valid, stop
+      if (addressLines.length >= 4) {
         break
       }
       
@@ -161,7 +204,10 @@ function App() {
         url = `https://waze.com/ul?q=${encodedAddress}`
         break
       case 'here':
-        url = `https://wego.here.com/directions/drive/${encodedAddress}`
+        // Use HERE WeGo app deep link - try app first, fallback to web if needed
+        // Android and iOS both support heremaps://
+        url = `heremaps://directions?daddr=${encodedAddress}`
+        // If app isn't installed, user will need to install it or use web version
         break
       case 'apple':
         url = `https://maps.apple.com/?q=${encodedAddress}`
@@ -170,7 +216,12 @@ function App() {
         return
     }
 
-    window.open(url, '_blank')
+    // For HERE WeGo app link, try location.href instead of window.open for better app opening
+    if (service === 'here') {
+      window.location.href = url
+    } else {
+      window.open(url, '_blank')
+    }
   }
 
   const copyAddress = () => {
