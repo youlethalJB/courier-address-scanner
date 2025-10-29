@@ -22,53 +22,26 @@ function App() {
     setTimeout(() => setShowToast({ show: false, message: '' }), 3000)
   }
 
-  const isLikelyAddressLine = (line) => {
+  const shouldExcludeLine = (line) => {
     const trimmed = line.trim()
     
-    // Filter out very short lines (likely just numbers or single chars)
-    if (trimmed.length < 3) return false
+    // Filter out very short lines (less than 2 chars)
+    if (trimmed.length < 2) return true
     
-    // Filter out lines that are mostly numbers (likely tracking numbers, barcodes)
-    const numbersOnly = /^\d+$/.test(trimmed.replace(/\s/g, ''))
-    if (numbersOnly && trimmed.length > 6) return false
-    
-    // Filter out tracking number patterns (e.g., "ABC1234567890", "1234567890123")
-    const trackingPattern = /^[A-Z0-9]{10,}$/.test(trimmed.replace(/[\s-]/g, ''))
-    if (trackingPattern) return false
-    
-    // Filter out barcode-like patterns (long sequences with dashes/underscores)
-    const barcodePattern = /^[A-Z0-9\-_]{12,}$/i.test(trimmed)
-    if (barcodePattern) return false
-    
-    // Filter out lines with too many consecutive numbers or special chars
-    const tooManyNumbers = (trimmed.match(/\d/g) || []).length / trimmed.length > 0.7
-    if (tooManyNumbers && trimmed.length > 8) return false
-    
-    // Filter out lines that are all uppercase and very long (often headers like "SHIP TO:")
-    if (trimmed === trimmed.toUpperCase() && trimmed.length > 20 && !trimmed.includes(',')) {
+    // Filter out obvious headers (all caps, very long)
+    if (trimmed === trimmed.toUpperCase() && trimmed.length > 25) {
       if (/^(SHIP|DELIVERY|ADDRESS|TO|FROM|ORDER|TRACKING|PARCEL)/i.test(trimmed)) {
-        return false
+        return true
       }
     }
     
-    // Keep lines that contain address indicators
-    const addressIndicators = /\b(street|st|road|rd|avenue|ave|lane|ln|drive|dr|close|cl|way|terrace|terr|grove|gr|crescent|cres|court|ct|place|pl|square|sq|park|pk)\b/i
-    if (addressIndicators.test(trimmed)) return true
+    // Filter out long tracking numbers (15+ characters of numbers/letters only)
+    const alphanumericOnly = /^[A-Z0-9\-_]+$/i.test(trimmed.replace(/\s/g, ''))
+    if (alphanumericOnly && trimmed.replace(/[\s-]/g, '').length >= 15) return true
     
-    // Keep lines that look like addresses (mix of letters/numbers, reasonable length)
-    const hasLetters = /[A-Za-z]/.test(trimmed)
-    const hasNumbers = /\d/.test(trimmed)
-    const reasonableLength = trimmed.length >= 5 && trimmed.length <= 50
-    
-    // Likely address if: has letters, reasonable length, and either has numbers (house number) or is postcode area
-    if (hasLetters && reasonableLength) {
-      // Check if it's just a city/town name (no numbers but reasonable)
-      if (!hasNumbers && trimmed.length >= 4 && trimmed.length <= 20) return true
-      // Check if it has a house number pattern
-      if (hasNumbers && /^\d+[A-Za-z]?\s+[A-Za-z]/.test(trimmed)) return true
-      // Check if it has number near the start (common in addresses)
-      if (/\d/.test(trimmed.slice(0, 10))) return true
-    }
+    // Filter out lines that are just long numbers (10+ digits)
+    const justNumbers = /^\d+$/.test(trimmed.replace(/\s/g, ''))
+    if (justNumbers && trimmed.replace(/\s/g, '').length >= 10) return true
     
     return false
   }
@@ -88,50 +61,33 @@ function App() {
     }
 
     if (postcodeIndex === -1) {
-      // No postcode found, try to filter and return likely address lines
-      const filteredLines = lines.filter(isLikelyAddressLine)
+      // No postcode found, return filtered text
+      const filteredLines = lines.filter(line => !shouldExcludeLine(line))
       return filteredLines.join(', ') || text
     }
 
     // Extract postcode separately (may have other text on same line)
     const postcodeMatch = postcodeLine.match(POSTCODE_REGEX)
-    const postcode = postcodeMatch ? postcodeMatch[0] : postcodeLine
+    const searchedPostcode = postcodeMatch ? postcodeMatch[0] : postcodeLine
     
-    // Look backwards from postcode to find address lines
+    // Get lines before postcode (2-4 lines typically)
     const addressLines = []
-    let foundName = false
     
-    // Start from 4-5 lines before postcode and work forward
-    const startSearch = Math.max(0, postcodeIndex - 5)
+    // Start from up to 4 lines before postcode
+    const startIndex = Math.max(0, postcodeIndex - 4)
     
-    for (let i = startSearch; i < postcodeIndex; i++) {
+    for (let i = startIndex; i < postcodeIndex; i++) {
       const line = lines[i]
       
-      // Skip lines that don't look like address components
-      if (!isLikelyAddressLine(line)) continue
+      // Skip obvious non-address lines
+      if (shouldExcludeLine(line)) continue
       
-      // Check if this might be a name (typically first line, capitalized, no numbers, reasonable length)
-      if (!foundName && i === startSearch) {
-        const looksLikeName = /^[A-Z][a-z]+(\s+[A-Z][a-z]+)*$/.test(line) && 
-                             line.length >= 3 && 
-                             line.length <= 40 &&
-                             !/\d/.test(line)
-        if (looksLikeName) {
-          addressLines.push(line)
-          foundName = true
-          continue
-        }
-      }
-      
-      // Add address lines (street, town, etc.)
+      // Add the line (be permissive - trust the user to edit if needed)
       addressLines.push(line)
-      
-      // Limit to 3-4 address lines (name + 2-3 address lines before postcode)
-      if (addressLines.length >= 4) break
     }
     
     // Add postcode at the end
-    addressLines.push(postcode)
+    addressLines.push(searchedPostcode)
     
     return addressLines.join(', ')
   }
