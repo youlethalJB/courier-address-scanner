@@ -225,6 +225,9 @@ function App() {
                 ref={webcamRef}
                 audio={false}
                 screenshotFormat="image/jpeg"
+                videoConstraints={{
+                  facingMode: 'environment'
+                }}
                 className="w-full rounded-lg"
               />
               <div className="mt-4 flex gap-3">
