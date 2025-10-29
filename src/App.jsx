@@ -43,12 +43,47 @@ function App() {
     const postcodeMatch = lines[postcodeIndex].match(POSTCODE_REGEX)
     const postcode = postcodeMatch ? postcodeMatch[0] : lines[postcodeIndex]
     
-    // Get up to 5 lines before the postcode (including the postcode line)
-    const startIndex = Math.max(0, postcodeIndex - 5)
-    const addressLines = lines.slice(startIndex, postcodeIndex + 1)
+    // Helper to check if a line is likely package metadata (not address)
+    const isPackageMetadata = (line) => {
+      const trimmed = line.trim()
+      // Very long lines (likely tracking info or barcodes)
+      if (trimmed.length > 40) return true
+      // Long alphanumeric strings without spaces (tracking numbers)
+      if (/^[A-Z0-9\-_]{15,}$/i.test(trimmed.replace(/\s/g, ''))) return true
+      // Headers like "SHIP TO", "DELIVERY ADDRESS", etc.
+      if (trimmed === trimmed.toUpperCase() && /^(SHIP|DELIVERY|ADDRESS|TO|FROM|ORDER|TRACKING|PARCEL|REF)/i.test(trimmed)) return true
+      // Lines that are mostly numbers (tracking numbers)
+      const numRatio = (trimmed.match(/\d/g) || []).length / trimmed.length
+      if (numRatio > 0.8 && trimmed.length > 10) return true
+      return false
+    }
     
-    // Replace the postcode line with just the clean postcode
-    addressLines[addressLines.length - 1] = postcode
+    // Work backwards from postcode, collecting address lines
+    // UK addresses typically have: name, street, town/city, postcode (3-4 lines total)
+    const addressLines = []
+    let linesToCheck = Math.min(6, postcodeIndex) // Check up to 6 lines before postcode
+    
+    for (let i = postcodeIndex - 1; i >= 0 && addressLines.length < 3 && linesToCheck > 0; i--) {
+      const line = lines[i]
+      
+      // Skip package metadata
+      if (isPackageMetadata(line)) {
+        linesToCheck--
+        continue
+      }
+      
+      // If we already have 3 lines and this line is very short or looks like metadata, stop
+      if (addressLines.length >= 3 && (line.length < 3 || isPackageMetadata(line))) {
+        break
+      }
+      
+      // Add the line to address (working backwards, so insert at beginning)
+      addressLines.unshift(line)
+      linesToCheck--
+    }
+    
+    // Add postcode at the end
+    addressLines.push(postcode)
     
     return addressLines.join(', ')
   }
