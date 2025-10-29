@@ -85,12 +85,19 @@ function App() {
       if (!/[A-Za-z]/.test(trimmed)) return false
       
       // Must be reasonable length (too short might be OCR fragments, too long might be something else)
-      if (trimmed.length < 2 || trimmed.length > 50) return false
+      if (trimmed.length < 3 || trimmed.length > 50) return false
       
-      // Should have reasonable letter-to-symbol ratio
+      // Should have reasonable letter-to-symbol ratio (at least 50% letters/spaces)
       const letterCount = (trimmed.match(/[A-Za-z\s]/g) || []).length
       const letterRatio = letterCount / trimmed.length
-      if (letterRatio < 0.4 && trimmed.length > 5) return false
+      if (letterRatio < 0.5 && trimmed.length > 5) return false
+      
+      // Reject lines with too many consecutive uppercase letters without spaces (OCR noise)
+      if (/[A-Z]{8,}/.test(trimmed) && !/\s/.test(trimmed.match(/[A-Z]{8,}/)?.[0] || '')) return false
+      
+      // Reject lines that are mostly punctuation or special chars
+      const normalChars = trimmed.match(/[A-Za-z0-9\s]/g) || []
+      if (normalChars.length < trimmed.length * 0.6) return false
       
       return true
     }
@@ -204,10 +211,8 @@ function App() {
         url = `https://waze.com/ul?q=${encodedAddress}`
         break
       case 'here':
-        // Use HERE WeGo app deep link - try app first, fallback to web if needed
-        // Android and iOS both support heremaps://
-        url = `heremaps://directions?daddr=${encodedAddress}`
-        // If app isn't installed, user will need to install it or use web version
+        // Use HERE WeGo web URL that will open app if installed, fallback to web
+        url = `https://wego.here.com/directions/drive/${encodedAddress}`
         break
       case 'apple':
         url = `https://maps.apple.com/?q=${encodedAddress}`
@@ -216,12 +221,7 @@ function App() {
         return
     }
 
-    // For HERE WeGo app link, try location.href instead of window.open for better app opening
-    if (service === 'here') {
-      window.location.href = url
-    } else {
-      window.open(url, '_blank')
-    }
+    window.open(url, '_blank')
   }
 
   const copyAddress = () => {
